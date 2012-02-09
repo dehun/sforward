@@ -47,72 +47,14 @@
 /* create common buffer in statis memory for security reasons */
 static char buffer[BUFFER_SIZE]; 
 
-
-int get_tcp_listen_sock() {
-	int listen_sock;
+int connect_outcome(int outcome_sock) {
 	struct sockaddr_in sa;
-	/* create socket */
-	listen_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (listen_sock < 0) {
-		elog("can't create listen socket\n");
-		return -1;
-	}
 
-	/* bind */
-	memset(&sa, 0, sizeof(sa));
-	sa.sin_family = AF_INET;
-#ifdef INCOME_IP_ANY
-	sa.sin_addr.s_addr = INADDR_ANY;
-#else
-	sa.sin_addr.s_addr = inet_addr(INCOME_IP);
-#endif
-	sa.sin_port = htons(INCOME_PORT);
-	if (bind(listen_sock, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
-		elog("can't bind income socket\n");
-		return -1;
-	} 
-
-	/* set to listen state */
-	if (listen(listen_sock, 1) < 0) {
-		elog("can't set listen_sock to listen mode\n");
-		return -1;
-	}
-
-	return listen_sock;
-}
-
-int get_tcp_client_sock(int listen_sock) {
-	int client_sock;
-	struct sockaddr_in sa;
-	int sa_len = sizeof(sa);
-
-	/* accept */
-	if ((client_sock = accept(listen_sock, (struct sockaddr *)&sa, &sa_len)) < 0) {
-		elog("can't accept new connection\n");
-		return -1;
-	}
-
-	vlog("got income client\n");
-	return client_sock;
-}
-
-int get_outcome_tcp_sock()
-{
-	int outcome_sock;
-	struct sockaddr_in sa;
-	char *outcome_addr = OUTCOME_IP;
-
-	/* create sock */
-	if ((outcome_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
-		elog("can't create outgoing socket\n");
-		return -1;
-	}
-	
 	/* set address */
 	memset(&sa, 0, sizeof(sa));
 	sa.sin_family = AF_INET;
-	if (inet_aton(outcome_addr, &sa.sin_addr) <= 0) {
-		elog("can't convert outcome addr in get_outcome_tcp_sock");
+	if (inet_aton(OUTCOME_IP, &sa.sin_addr) <= 0) {
+		elog("can't convert outcome ip addr");
 		return -1;
 	}
 	sa.sin_port = htons(OUTCOME_PORT);
@@ -125,8 +67,7 @@ int get_outcome_tcp_sock()
 	}
 
 	ilog("successfuly connected to outboud");
-	return outcome_sock;
-		
+	return 0;
 }
 
 int traverse(int from_sock, int to_sock) {
@@ -207,40 +148,171 @@ int sock_loop(int income_sock, int outcome_sock) {
 	}
 }
 
+/*
+ * TCP related functions
+ */
+
+int get_tcp_listen_sock() {
+	int listen_sock;
+	struct sockaddr_in sa;
+	/* create socket */
+	listen_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (listen_sock < 0) {
+		elog("can't create listen socket\n");
+		return -1;
+	}
+
+	/* bind */
+	memset(&sa, 0, sizeof(sa));
+	sa.sin_family = AF_INET;
+#ifdef INCOME_IP_ANY
+	sa.sin_addr.s_addr = INADDR_ANY;
+#else
+	sa.sin_addr.s_addr = inet_addr(INCOME_IP);
+#endif
+	sa.sin_port = htons(INCOME_PORT);
+	if (bind(listen_sock, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
+		elog("can't bind income socket\n");
+		return -1;
+	} 
+
+	/* set to listen state */
+	if (listen(listen_sock, 1) < 0) {
+		elog("can't set listen_sock to listen mode\n");
+		return -1;
+	}
+
+	return listen_sock;
+}
+
+int get_tcp_client_sock(int listen_sock) {
+	int client_sock;
+	struct sockaddr_in sa;
+	int sa_len = sizeof(sa);
+
+	/* accept */
+	if ((client_sock = accept(listen_sock, (struct sockaddr *)&sa, &sa_len)) < 0) {
+		elog("can't accept new connection\n");
+		return -1;
+	}
+
+	vlog("got income client\n");
+	return client_sock;
+}
+
+
+
+int get_outcome_tcp_sock()
+{
+	int outcome_sock;
+
+	/* create sock */
+	if ((outcome_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
+		elog("can't create outgoing socket\n");
+		return -1;
+	}
+
+	if(connect_outcome(outcome_sock) < 0) {
+		close(outcome_sock);
+		return -1;
+	}
+	return outcome_sock;
+	
+}
+
 int start_tcp() {
 	int listen_sock;
 	int income_sock;
 	int outcome_sock;
+	int res = 0;
 	/* open listen connection  */
 	ilog("opening listen connection\n");
-	if ((listen_sock = get_tcp_listen_sock()) < 0)
+	if ((listen_sock = get_tcp_listen_sock()) < 0) {
+		res = -1;
 		goto cleanup;
+	}
 
 	/* accept client */
 	vlog("created listen sock : %d\n", listen_sock);
 	ilog("waiting for client to connect to income\n");
-	if ((income_sock = get_tcp_client_sock(listen_sock)) < 0)
+	if ((income_sock = get_tcp_client_sock(listen_sock)) < 0) {
+		res = -1;
 		goto cleanup;
+	}
 	
 	/* open outcome connection */
 	ilog("opening outcome connection\n");
 	if ((outcome_sock = get_outcome_tcp_sock()) < 0) {
+		res = -1;
 		goto cleanup;
 	}
 
-	/* tcp send recv loop */
-	sock_loop(income_sock, outcome_sock);
+	/* fall into send & recv loop */
+	res = sock_loop(income_sock, outcome_sock);
 
 	/* cleanup */
  cleanup:
 	close(income_sock);
 	close(outcome_sock);
+	return res;
+}
+
+/*
+ * UDP
+ */
+int get_udp_income_sock() {
+	int income_sock;
+	income_sock = socket(AF_INET, SOCK_DGRAM, 0);
+	return income_sock;
+}
+
+int get_udp_outcome_sock() {
+	int outcome_sock;
+	if ((outcome_sock = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+		return -1;
+	connect_outcome(outcome_sock);
+	return outcome_sock;
+}
+
+int udp_connect_income_sock(int income_sock) {
+	/* here we wait for first udp packet and assume that the first packet is the connection initiation
+	 * we just lost this packet cos this is udp
+	 */
+	struct sockaddr_in sa;
+	socklen_t sa_len = sizeof(sa);
+	if (recvfrom(income_sock, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&sa, &sa_len) < 0)
+		return -1;
+	return connect(income_sock, (struct sockaddr *)&sa, sa_len);
 }
 
 int start_udp() {
-	int listen_sock;
+	int outcome_sock;
 	int income_sock;
-	/* open udp listen socket */
+	int res = 0;
+	/* open udp income socket */
+	if ((income_sock = get_udp_income_sock()) < 0) {
+		res = -1;
+		goto cleanup;
+	}
+	
+	/* listen for incoming packet on udp socket and connect*/
+	if (udp_connect_income_sock(income_sock) < 0) {
+		res = -1;
+		goto cleanup;
+	}
+
+	/* open udp outcome socket */
+	if ((outcome_sock = get_udp_outcome_sock()) < 0) {
+		res = -1;
+		goto cleanup;
+	}
+
+	/* fall into send & recv loop */
+	res = sock_loop(income_sock, outcome_sock);
+ cleanup:
+	close(income_sock);
+	close(outcome_sock);
+	return res;
 } 
 
 void daemonize() {
