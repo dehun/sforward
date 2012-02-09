@@ -1,3 +1,13 @@
+/*
+ * sforward - simple port forwarder for udp and tcp
+ * it was built as simple c program in one source file
+ * it can forward tcp and udp connections
+ * serves only one client. no multiclient mode
+ * uses select method
+ * all config lay in defines which is very useful for hiding
+ */
+
+
 #include <stdio.h>      /* for printf() and fprintf() */
 #include <sys/socket.h> /* for socket(), connect(), send(), and recv() */
 #include <arpa/inet.h>  /* for sockaddr_in and inet_addr() */
@@ -10,17 +20,19 @@
 #define IPROTO_UDP 2
 
 /* config */
-#define INCOME_IP_ANY
-#ifndef INCOME_IP_ANY
-    #define INCOME_IP "192.168.1.177" 
+#define INCOME_IP_ANY                 /* if defined then bind on all availaible interfaces */
+#ifndef INCOME_IP_ANY               
+    #define INCOME_IP "192.168.1.177" /* address to bind for incoming connection listen socket if no INCOME_IP_ANY */ 
 #endif
-#define INCOME_PORT 5222
-#define OUTCOME_IP "74.125.232.244"
-#define OUTCOME_PORT 80
-#define PROTO IPROTO_TCP
-#define DEMON
-#define VERBOSE 0
-#define BUFFER_SIZE 1024*1024*128
+#define INCOME_PORT 5222              /* port for incoming connection */
+#define OUTCOME_IP "74.125.232.244"   /* ip for outcome connection to connect to */
+#define OUTCOME_PORT 80               /* port for outcome connection */
+#define PROTO IPROTO_TCP              /* protocol to use. IPPROTO_TCP or IPPROTO_UDP */
+#define DAEMON                         /* if defined then launch process as daemon */
+#define VERBOSE 0                     /* if defined produce more verbose output */
+#define BUFFER_SIZE 1024*1024*128     /* temporary buffer size */
+#define ONCE                          /* if defined then there only one connection can be made. then process die
+										 else we just reopen listen socket and wait for another one */
 
 /* logging */
 #if VERBOSE > 0
@@ -35,9 +47,6 @@
 /* create common buffer in statis memory for security reasons */
 static char buffer[BUFFER_SIZE]; 
 
-void demonize() {
-	
-}
 
 int get_tcp_listen_sock() {
 	int listen_sock;
@@ -148,8 +157,8 @@ int sock_loop(int income_sock, int outcome_sock) {
 	fds[1] = &fdwrite;
 	fds[2] = &fdexcept;
 	/* set sockets to non block mode */
-	fcntl(income_sock, F_SETFL, O_NONBLOCK);
-	fcntl(outcome_sock, F_SETFL, O_NONBLOCK);
+	/*fcntl(income_sock, F_SETFL, O_NONBLOCK);
+	  fcntl(outcome_sock, F_SETFL, O_NONBLOCK);*/
 	
 
 	for(;;) {
@@ -205,45 +214,59 @@ int start_tcp() {
 	/* open listen connection  */
 	ilog("opening listen connection\n");
 	if ((listen_sock = get_tcp_listen_sock()) < 0)
-		return -1;
+		goto cleanup;
 
 	/* accept client */
 	vlog("created listen sock : %d\n", listen_sock);
 	ilog("waiting for client to connect to income\n");
 	if ((income_sock = get_tcp_client_sock(listen_sock)) < 0)
-		return -1;
+		goto cleanup;
 	
-	/* close listen socket. leave no trace */
-	/*close(listen_sock); */
-
 	/* open outcome connection */
 	ilog("opening outcome connection\n");
-	outcome_sock = get_outcome_tcp_sock();
+	if ((outcome_sock = get_outcome_tcp_sock()) < 0) {
+		goto cleanup;
+	}
 
 	/* tcp send recv loop */
 	sock_loop(income_sock, outcome_sock);
 
 	/* cleanup */
+ cleanup:
 	close(income_sock);
 	close(outcome_sock);
 }
 
 int start_udp() {
+	int listen_sock;
+	int income_sock;
+	/* open udp listen socket */
 } 
 
+void daemonize() {
+	
+}
+
 int main() {
-#ifdef DEMON
+#ifdef DAEMON
 	ilog("running in background\n");
-	demonize();
+	daemonize();
 #else
 	ilog("running in foreground\n");
 #endif
 
 #if PROTO == IPROTO_TCP
-	return start_tcp();
-#else
-	return start_udp();
+	#ifndef ONCE
+	for (;;) 
+    #endif
+		start_tcp();
+#elif PROTO == IPPROTO_UDP
+	#ifndef ONCE
+	for (;;)
+	#endif
+		start_udp();
+#else 
+	#error unsupported protocol selected. use IPPROTO_TCP or IPPROTO_UDP
 #endif
 }
-
 
