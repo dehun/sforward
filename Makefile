@@ -1,5 +1,5 @@
 make:
-	gcc sforwarder.c -o sforwarder
+	gcc sforward.c -o sforward
 
 clean:
-	rm sforwarder
+	rm sforward
