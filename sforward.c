@@ -24,12 +24,12 @@
 #ifndef INCOME_IP_ANY               
     #define INCOME_IP "192.168.1.177" /* address to bind for incoming connection listen socket if no INCOME_IP_ANY */ 
 #endif
-#define INCOME_PORT 5222              /* port for incoming connection */
-#define OUTCOME_IP "74.125.232.244"   /* ip for outcome connection to connect to */
-#define OUTCOME_PORT 80               /* port for outcome connection */
-#define PROTO IPROTO_TCP              /* protocol to use. IPPROTO_TCP or IPPROTO_UDP */
+#define INCOME_PORT 50100              /* port for incoming connection */
+#define OUTCOME_IP "94.244.171.151"   /* ip for outcome connection to connect to */
+#define OUTCOME_PORT 8086               /* port for outcome connection */
+#define PROTO IPROTO_UDP              /* protocol to use. IPPROTO_TCP or IPPROTO_UDP */
 #define DAEMON                         /* if defined then launch process as daemon */
-#define VERBOSE 0                     /* if defined produce more verbose output */
+#define VERBOSE 1                     /* if defined produce more verbose output */
 #define BUFFER_SIZE 1024*1024*128     /* temporary buffer size */
 #define ONCE                          /* if defined then there only one connection can be made. then process die
 										 else we just reopen listen socket and wait for another one */
@@ -67,6 +67,24 @@ int connect_outcome(int outcome_sock) {
 	}
 
 	ilog("successfuly connected to outboud");
+	return 0;
+}
+
+int bind_income_socket(int income_socket) {
+	struct sockaddr_in sa;
+	/* bind */
+	memset(&sa, 0, sizeof(sa));
+	sa.sin_family = AF_INET;
+#ifdef INCOME_IP_ANY
+	sa.sin_addr.s_addr = INADDR_ANY;
+#else
+	sa.sin_addr.s_addr = inet_addr(INCOME_IP);
+#endif
+	sa.sin_port = htons(INCOME_PORT);
+	if (bind(income_socket, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
+		elog("can't bind income socket\n");
+		return -1;
+	} 
 	return 0;
 }
 
@@ -162,20 +180,7 @@ int get_tcp_listen_sock() {
 		return -1;
 	}
 
-	/* bind */
-	memset(&sa, 0, sizeof(sa));
-	sa.sin_family = AF_INET;
-#ifdef INCOME_IP_ANY
-	sa.sin_addr.s_addr = INADDR_ANY;
-#else
-	sa.sin_addr.s_addr = inet_addr(INCOME_IP);
-#endif
-	sa.sin_port = htons(INCOME_PORT);
-	if (bind(listen_sock, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
-		elog("can't bind income socket\n");
-		return -1;
-	} 
-
+	bind_income_socket(listen_sock);
 	/* set to listen state */
 	if (listen(listen_sock, 1) < 0) {
 		elog("can't set listen_sock to listen mode\n");
@@ -262,12 +267,19 @@ int start_tcp() {
  */
 int get_udp_income_sock() {
 	int income_sock;
+	vlog("getting udp income socket\n");
 	income_sock = socket(AF_INET, SOCK_DGRAM, 0);
+	/* bind it */
+	if (bind_income_socket(income_sock) < 0) {
+		elog("can't bind income socket\n");
+		return -1;
+	}
 	return income_sock;
 }
 
 int get_udp_outcome_sock() {
 	int outcome_sock;
+	vlog("getting udp outcome socket\n");
 	if ((outcome_sock = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
 		return -1;
 	connect_outcome(outcome_sock);
@@ -280,8 +292,10 @@ int udp_connect_income_sock(int income_sock) {
 	 */
 	struct sockaddr_in sa;
 	socklen_t sa_len = sizeof(sa);
+	vlog("connection udp income socket...\n");
 	if (recvfrom(income_sock, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&sa, &sa_len) < 0)
 		return -1;
+	ilog("udp income socket get packet and connecting now\n");
 	return connect(income_sock, (struct sockaddr *)&sa, sa_len);
 }
 
@@ -308,6 +322,7 @@ int start_udp() {
 	}
 
 	/* fall into send & recv loop */
+	ilog("got udp connections and now fall into recv send loop\n");
 	res = sock_loop(income_sock, outcome_sock);
  cleanup:
 	close(income_sock);
@@ -332,7 +347,7 @@ int main() {
 	for (;;) 
     #endif
 		start_tcp();
-#elif PROTO == IPPROTO_UDP
+#elif PROTO == IPROTO_UDP
 	#ifndef ONCE
 	for (;;)
 	#endif
